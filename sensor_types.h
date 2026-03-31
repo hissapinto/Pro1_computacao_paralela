@@ -6,7 +6,7 @@
 typedef enum { TEMPERATURA, UMIDADE, ENERGIA, CORRENTE, PRESSAO } SensorTipo;
 typedef enum { OK, ALERTA, CRITICO } Status;
 
-typedef struct {
+typedef struct { 
       // Vai guardar o id do sensor (0-19)
       int sensor_id; // 4 bytes
 

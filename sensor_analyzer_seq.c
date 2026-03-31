@@ -19,7 +19,7 @@ FILE *abrir_arquivo(const char *caminho, const char *modo) {
             printf("Erro ao abrir %s\n", caminho);
             exit(EXIT_FAILURE);
       }
-      return arquivo;
+      return arquivo; 
 }
 
 int contar_linhas(FILE *arquivo) {
