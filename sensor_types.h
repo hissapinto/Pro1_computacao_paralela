@@ -51,6 +51,8 @@ typedef struct {
     TSensor *sensor_struct;
     TStatSensor *stats;
     TSensor *anomalias;
+    char *caminho_arquivo;
+    long file_offset;
 } Args;
 
 #endif
