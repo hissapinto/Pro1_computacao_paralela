@@ -136,14 +136,6 @@ void calcular_estatisticas(TStatSensor *stats)
 
 void calcular_anomalias(TSensor *struct_sensor, TStatSensor *stats, TSensor *anomalias, int inicio, int fim)
 {
-    TSensor *anomalias_local = malloc((fim - inicio) * sizeof(TSensor));
-    if (anomalias_local == NULL)
-    {
-        fprintf(stderr, "Erro ao alocar buffer local de anomalias\n");
-        return;
-    }
-    int qtd_local = 0;
-
     for (int i = inicio; i < fim; i++)
     {
         if (struct_sensor[i].tipo == TEMPERATURA)
@@ -152,23 +144,13 @@ void calcular_anomalias(TSensor *struct_sensor, TStatSensor *stats, TSensor *ano
             if (struct_sensor[i].dados >= stats[idx].media + stats[idx].desvio * 3 ||
                 struct_sensor[i].dados <= stats[idx].media - stats[idx].desvio * 3)
             {
-                anomalias_local[qtd_local++] = struct_sensor[i];
+                //Trava para as sessão crítica
+                pthread_mutex_lock(&mutex);
+                anomalias[qtd_anomalias++] = struct_sensor[i];
+                pthread_mutex_unlock(&mutex);
             }
         }
     }
-
-    if (qtd_local > 0)
-    {
-        pthread_mutex_lock(&mutex);
-        for (int i = 0; i < qtd_local; i++)
-        {
-            anomalias[qtd_anomalias + i] = anomalias_local[i];
-        }
-        qtd_anomalias += qtd_local;
-        pthread_mutex_unlock(&mutex);
-    }
-
-    free(anomalias_local);
 }
 
 void imprimir_estatisticas(TStatSensor *stats, TSensor *anomalias, int qtd_anomalias, struct timespec start)
@@ -235,16 +217,18 @@ void imprimir_estatisticas(TStatSensor *stats, TSensor *anomalias, int qtd_anoma
 
 void calcular_offsets(FILE *arquivo, long *offsets, int qtd_linhas, int chunk_size)
 {
-    char skip_buf[256];
+    char buffer[256];
     int next_chunk = 1;
-    offsets[0] = 0;
+    offsets[0] = 0; //chunk zero começa no indice zero
 
     for (int i = 0; i < qtd_linhas && next_chunk < NUM_THREADS; i++)
     {
-        fgets(skip_buf, sizeof(skip_buf), arquivo);
+        fgets(buffer, sizeof(buffer), arquivo);
+
+        //Se parou no valor de início do proximo chunck
         if (i + 1 == next_chunk * chunk_size)
         {
-            offsets[next_chunk] = ftell(arquivo);
+            offsets[next_chunk] = ftell(arquivo); //Guarda a posição do byte
             next_chunk++;
         }
     }
@@ -280,7 +264,7 @@ int main(int argc, char *argv[])
     struct timespec start;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
-    //Criação de variáveis necessárias
+    //Criação de variáveis necessárias para leitura
     FILE *arquivo = abrir_arquivo(argv[1], "r");
     int qtd_linhas = contar_linhas(arquivo);
 
