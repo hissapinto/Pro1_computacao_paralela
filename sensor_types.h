@@ -2,6 +2,7 @@
 #define SENSOR_TYPES_H
 
 #include <stdint.h>
+#include <stdio.h>
 
 typedef enum { TEMPERATURA, UMIDADE, ENERGIA, CORRENTE, PRESSAO } SensorTipo;
 typedef enum { OK, ALERTA, CRITICO } Status;
@@ -43,5 +44,13 @@ typedef struct {
       char datetime[20];
       float valor;
 } TAnomalia;
+
+typedef struct {
+    int inicio;
+    int fim;
+    TSensor *sensor_struct;
+    TStatSensor *stats;
+    TSensor *anomalias;
+} Args;
 
 #endif
