@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
+// Caio Ariel - 10439611
+// Isabela Hissa Pinto - 10441873
+// Kaique Paiva - 10441787
+
 typedef enum { TEMPERATURA, UMIDADE, ENERGIA, CORRENTE, PRESSAO } SensorTipo;
 typedef enum { OK, ALERTA, CRITICO } Status;
 

@@ -11,6 +11,9 @@
 #define MAX_ANOMALIAS 100000
 #define MAX_SENSORES 20
 //#define NUM_THREADS 16
+// Caio Ariel - 10439611
+// Isabela Hissa Pinto - 10441873
+// Kaique Paiva - 10441787
 
 int total_alertas = 0;
 float consumo_energia = 0.0;
