@@ -10,13 +10,15 @@
 
 #define MAX_ANOMALIAS 100000
 #define MAX_SENSORES 20
-#define NUM_THREADS 16
+//#define NUM_THREADS 16
 
 int total_alertas = 0;
 float consumo_energia = 0.0;
 int qtd_anomalias = 0;
 TStatSensor stats[MAX_SENSORES] = {0};
-pthread_mutex_t mutex;
+pthread_mutex_t mutex_stats;
+pthread_mutex_t mutex_energia;
+pthread_mutex_t mutex_alertas;
 
 FILE *abrir_arquivo(const char *caminho, const char *modo)
 {
@@ -70,15 +72,20 @@ Status parse_status(char *status_str)
 
 void parse(TSensor *struct_sensor, int inicio, int fim, TStatSensor *stats, char *caminho, long offset)
 {
+    TStatSensor temp_stats[MAX_SENSORES] = {0};
+    float temp_energia = 0.0;
+    int temp_alertas = 0;
+
     char buffer[256];
 
-    //recebe endereço do arquivo e o abre
+    // recebe endereço do arquivo e o abre
     FILE *arquivo = fopen(caminho, "r");
-    if (arquivo == NULL) return;
+    if (arquivo == NULL)
+        return;
 
     // pula direto pra linha certa
     fseek(arquivo, offset, SEEK_SET);
-    
+
     for (int i = inicio; i < fim; i++)
     {
         if (fgets(buffer, sizeof(buffer), arquivo) == NULL)
@@ -102,26 +109,43 @@ void parse(TSensor *struct_sensor, int inicio, int fim, TStatSensor *stats, char
         struct_sensor[i].dados = valor;
         struct_sensor[i].status = parse_status(status_str);
 
-        //Trava para as sessão crítica
-        pthread_mutex_lock(&mutex);
         int idx = sensor_id - 1;
         if (struct_sensor[i].tipo == TEMPERATURA && idx <= 20)
         {
-            stats[idx].soma += valor;
-            stats[idx].soma_quadrados += valor * valor;
-            stats[idx].contagem++;
+            temp_stats[idx].soma += valor;
+            temp_stats[idx].soma_quadrados += valor * valor;
+            temp_stats[idx].contagem++;
         }
 
         if (struct_sensor[i].tipo == ENERGIA)
-            consumo_energia += valor;
+            temp_energia += valor;
 
         if (struct_sensor[i].status == ALERTA || struct_sensor[i].status == CRITICO)
-            total_alertas++;
-        pthread_mutex_unlock(&mutex);
+            temp_alertas++;
     }
+
+    //Sessão crítica
+    pthread_mutex_lock(&mutex_stats);
+    for (int i = 0; i < 20; i++)
+    {
+            stats[i].soma += temp_stats[i].soma;
+            stats[i].soma_quadrados += temp_stats[i].soma_quadrados;
+            stats[i].contagem += temp_stats[i].contagem;
+    }
+    pthread_mutex_unlock(&mutex_stats);
+
+    pthread_mutex_lock(&mutex_energia);
+    consumo_energia += temp_energia;
+    pthread_mutex_unlock(&mutex_energia);
+
+    pthread_mutex_lock(&mutex_alertas);
+    total_alertas += temp_alertas;
+    pthread_mutex_unlock(&mutex_alertas);
+
     fclose(arquivo);
 }
 
+//Não paralelizado por ser pouco trabalho -> custo de criar thread é maior
 void calcular_estatisticas(TStatSensor *stats)
 {
     for (int i = 0; i < MAX_SENSORES; i++)
@@ -136,6 +160,15 @@ void calcular_estatisticas(TStatSensor *stats)
 
 void calcular_anomalias(TSensor *struct_sensor, TStatSensor *stats, TSensor *anomalias, int inicio, int fim)
 {
+    TSensor *anomalias_local = malloc((fim - inicio) * sizeof(TSensor));
+
+    if (anomalias_local == NULL)
+    {
+        fprintf(stderr, "Erro ao alocar buffer local de anomalias\n");
+        return;
+    }
+    int qtd_local = 0;
+
     for (int i = inicio; i < fim; i++)
     {
         if (struct_sensor[i].tipo == TEMPERATURA)
@@ -144,13 +177,23 @@ void calcular_anomalias(TSensor *struct_sensor, TStatSensor *stats, TSensor *ano
             if (struct_sensor[i].dados >= stats[idx].media + stats[idx].desvio * 3 ||
                 struct_sensor[i].dados <= stats[idx].media - stats[idx].desvio * 3)
             {
-                //Trava para as sessão crítica
-                pthread_mutex_lock(&mutex);
-                anomalias[qtd_anomalias++] = struct_sensor[i];
-                pthread_mutex_unlock(&mutex);
+                anomalias_local[qtd_local++] = struct_sensor[i];
             }
         }
     }
+
+    if (qtd_local > 0)
+    {
+        pthread_mutex_lock(&mutex_stats);
+        for (int i = 0; i < qtd_local; i++)
+        {
+            anomalias[qtd_anomalias + i] = anomalias_local[i];
+        }
+        qtd_anomalias += qtd_local;
+        pthread_mutex_unlock(&mutex_stats);
+    }
+
+    free(anomalias_local);
 }
 
 void imprimir_estatisticas(TStatSensor *stats, TSensor *anomalias, int qtd_anomalias, struct timespec start)
@@ -215,27 +258,28 @@ void imprimir_estatisticas(TStatSensor *stats, TSensor *anomalias, int qtd_anoma
     }
 }
 
-void calcular_offsets(FILE *arquivo, long *offsets, int qtd_linhas, int chunk_size)
+void calcular_offsets(FILE *arquivo, long *offsets, int qtd_linhas, int chunk_size, int num_threads)
 {
     char buffer[256];
     int next_chunk = 1;
-    offsets[0] = 0; //chunk zero começa no indice zero
+    offsets[0] = 0; // chunk zero começa no indice zero
 
-    for (int i = 0; i < qtd_linhas && next_chunk < NUM_THREADS; i++)
+    for (int i = 0; i < qtd_linhas && next_chunk < num_threads; i++)
     {
         fgets(buffer, sizeof(buffer), arquivo);
 
-        //Se parou no valor de início do proximo chunck
+        // Se parou no valor de início do proximo chunck
         if (i + 1 == next_chunk * chunk_size)
         {
-            offsets[next_chunk] = ftell(arquivo); //Guarda a posição do byte
+            offsets[next_chunk] = ftell(arquivo); // Guarda a posição do byte
             next_chunk++;
         }
     }
     rewind(arquivo);
 }
 
-void* thread_parse_func(void* arg){
+void *thread_parse_func(void *arg)
+{
     Args *args = (Args *)arg;
     parse(args->sensor_struct, args->inicio, args->fim, args->stats, args->caminho_arquivo, args->file_offset);
     return NULL;
@@ -250,34 +294,37 @@ void *thread_anomalias_func(void *arg)
 
 int main(int argc, char *argv[])
 {
-    //Verificação argumentos
-    if (argc < 2)
+    // Verificação argumentos
+    if (argc < 3)
     {
-        printf("Uso: %s <arquivo.log>\n", argv[0]);
+        printf("Uso: %s <num_threads> <arquivo.log>\n", argv[0]);
         return 1;
     }
 
-    //Inicializa o mutex
-    pthread_mutex_init(&mutex, NULL);
+    int num_threads = atoi(argv[1]);
 
-    //Inicializa tempo p/ métricas
+    pthread_mutex_init(&mutex_stats, NULL);
+    pthread_mutex_init(&mutex_energia, NULL);
+    pthread_mutex_init(&mutex_alertas, NULL);
+
+    // Inicializa tempo p/ métricas
     struct timespec start;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
-    //Criação de variáveis necessárias para leitura
-    FILE *arquivo = abrir_arquivo(argv[1], "r");
+    // Criação de variáveis necessárias para leitura
+    FILE *arquivo = abrir_arquivo(argv[2], "r");
     int qtd_linhas = contar_linhas(arquivo);
 
-    //Para as threads
-    int chunk_size = qtd_linhas / NUM_THREADS;
-    pthread_t threads[NUM_THREADS];
-    Args *argumentos[NUM_THREADS];
+    // Para as threads
+    int chunk_size = qtd_linhas / num_threads;
+    pthread_t *threads = malloc(num_threads * sizeof(pthread_t));
+    Args **argumentos = malloc(num_threads * sizeof(Args *));
 
-    //Para divisão de que thread le o que do arquivo
-    long offsets[NUM_THREADS];
-    calcular_offsets(arquivo, offsets, qtd_linhas, chunk_size);
+    // Para divisão de que thread le o que do arquivo
+    long *offsets = malloc(num_threads * sizeof(long));
+    calcular_offsets(arquivo, offsets, qtd_linhas, chunk_size, num_threads);
 
-    //Aloca array dos dados de leitura
+    // Aloca array dos dados de leitura
     TSensor *dados = malloc(qtd_linhas * sizeof(TSensor));
     if (dados == NULL)
     {
@@ -285,7 +332,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    //Aloca array de anomalias
+    // Aloca array de anomalias
     TSensor *anomalias = calloc(MAX_ANOMALIAS, sizeof(TSensor));
     if (anomalias == NULL)
     {
@@ -293,9 +340,9 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    //Fração Paralela 1
-    //Cria argumentos e threads
-    for (int i = 0; i < NUM_THREADS; i++)
+    // Fração Paralela 1
+    // Cria argumentos e threads
+    for (int i = 0; i < num_threads; i++)
     {
         argumentos[i] = malloc(sizeof(Args));
         if (argumentos[i] == NULL)
@@ -305,11 +352,11 @@ int main(int argc, char *argv[])
         }
 
         argumentos[i]->inicio = i * chunk_size;
-        argumentos[i]->fim = (i == NUM_THREADS - 1) ? qtd_linhas : (i + 1) * chunk_size;
+        argumentos[i]->fim = (i == num_threads - 1) ? qtd_linhas : (i + 1) * chunk_size;
         argumentos[i]->anomalias = anomalias;
         argumentos[i]->sensor_struct = dados;
         argumentos[i]->stats = stats;
-        argumentos[i]->caminho_arquivo = argv[1];
+        argumentos[i]->caminho_arquivo = argv[2];
         argumentos[i]->file_offset = offsets[i];
         if (pthread_create(&threads[i], NULL, thread_parse_func, argumentos[i]) != 0)
         {
@@ -318,17 +365,17 @@ int main(int argc, char *argv[])
         }
     }
 
-    //Finaliza primeiro sequencial
-    for (int l = 0; l < NUM_THREADS; l++)
+    // Finaliza primeiro sequencial
+    for (int l = 0; l < num_threads; l++)
     {
         pthread_join(threads[l], NULL);
     }
 
-    //Fração sequancial
+    // Fração sequancial
     calcular_estatisticas(stats);
 
-    //Fração Paralela 2
-    for (int k = 0; k < NUM_THREADS; k++)
+    // Fração Paralela 2
+    for (int k = 0; k < num_threads; k++)
     {
         if (pthread_create(&threads[k], NULL, thread_anomalias_func, argumentos[k]) != 0)
         {
@@ -337,7 +384,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    for (int j = 0; j < NUM_THREADS; j++)
+    for (int j = 0; j < num_threads; j++)
     {
         pthread_join(threads[j], NULL);
         free(argumentos[j]);
@@ -345,9 +392,14 @@ int main(int argc, char *argv[])
 
     imprimir_estatisticas(stats, anomalias, qtd_anomalias, start);
 
-    pthread_mutex_destroy(&mutex);
+   pthread_mutex_destroy(&mutex_stats);
+    pthread_mutex_destroy(&mutex_alertas);
+    pthread_mutex_destroy(&mutex_energia);
     fclose(arquivo);
     free(dados);
+    free(offsets);
+    free(threads);
+    free(argumentos);
     free(anomalias);
     return 0;
 }
