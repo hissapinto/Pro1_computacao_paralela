@@ -105,7 +105,7 @@ void parse(TSensor *struct_sensor, int inicio, int fim, TStatSensor *stats, char
         //Trava para as sessão crítica
         pthread_mutex_lock(&mutex);
         int idx = sensor_id - 1;
-        if (struct_sensor[i].tipo == TEMPERATURA && idx <= 20)
+        if (struct_sensor[i].tipo == TEMPERATURA && idx >= 0 && idx < MAX_SENSORES)
         {
             stats[idx].soma += valor;
             stats[idx].soma_quadrados += valor * valor;
@@ -196,7 +196,8 @@ void imprimir_estatisticas(TStatSensor *stats, TSensor *anomalias, int qtd_anoma
     do
     {
         printf("\nDeseja visualizar as anomalias detectadas? Digite:\n- 1 ver as 10 primeiras\n- 2 para ver todas\n- 3 para não ver.\n");
-        scanf("%d", &resposta);
+        if (scanf("%d", &resposta) != 1)
+            fprintf(stderr, "Erro ao ler entrada\n");
     } while (resposta != 1 && resposta != 2 && resposta != 3);
 
     if (resposta == 2)
@@ -215,7 +216,7 @@ void imprimir_estatisticas(TStatSensor *stats, TSensor *anomalias, int qtd_anoma
     }
 }
 
-void calcular_offsets(FILE *arquivo, long *offsets, int qtd_linhas, int chunk_size)
+void calcular_offsets(FILE *arquivo, long *offsets, int qtd_linhas, int chunk_size, int num_threads)
 {
     char buffer[256];
     int next_chunk = 1;
@@ -223,7 +224,8 @@ void calcular_offsets(FILE *arquivo, long *offsets, int qtd_linhas, int chunk_si
 
     for (int i = 0; i < qtd_linhas && next_chunk < num_threads; i++)
     {
-        fgets(buffer, sizeof(buffer), arquivo);
+        if (fgets(buffer, sizeof(buffer), arquivo) == NULL)
+            fprintf(stderr, "Erro ao ler linha\n");
 
         //Se parou no valor de início do proximo chunck
         if (i + 1 == next_chunk * chunk_size)
@@ -277,7 +279,7 @@ int main(int argc, char *argv[])
 
     //Para divisão de que thread le o que do arquivo
     long *offsets = malloc(num_threads * sizeof(long));
-    void calcular_offsets(FILE *arquivo, long *offsets, int qtd_linhas, int chunk_size, int num_threads)
+    calcular_offsets(arquivo, offsets, qtd_linhas, chunk_size, num_threads);
 
     //Aloca array dos dados de leitura
     TSensor *dados = malloc(qtd_linhas * sizeof(TSensor));

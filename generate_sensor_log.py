@@ -12,8 +12,8 @@ import argparse
 import math
 
 # --- Configurações padrão ---
-DEFAULT_SENSORES = 50
-DEFAULT_DIAS = 1
+DEFAULT_SENSORES = 20
+DEFAULT_DIAS = 7
 DEFAULT_OUTPUT = "sensores.log"
 
 # --- Tipos de sensores e suas faixas típicas ---

@@ -184,7 +184,8 @@ void imprimir_estatisticas(TStatSensor *stats, TSensor *anomalias, int qtd_anoma
       do
       {
             printf("\nDeseja visualizar as anomalias detectadas? Digite:\n- 1 ver as 10 primeiras\n- 2 para ver todas\n- 3 para não ver.\n");
-            scanf("%d", &resposta);
+            if (scanf("%d", &resposta) != 1)
+                fprintf(stderr, "Erro ao ler entrada\n");
       } while (resposta != 1 && resposta != 2 && resposta != 3);
 
       if (resposta == 2)

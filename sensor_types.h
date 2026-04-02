@@ -8,20 +8,12 @@ typedef enum { TEMPERATURA, UMIDADE, ENERGIA, CORRENTE, PRESSAO } SensorTipo;
 typedef enum { OK, ALERTA, CRITICO } Status;
 
 typedef struct { 
-      // Vai guardar o id do sensor (0-19)
-      int sensor_id; // 4 bytes
-
-      char datetime_str[20];
-
-      // Vai guardar o tipo do sensor
-      SensorTipo tipo; // 4 bytes
-
-      // Vai guardar dos dados extraidos do sensor
-      float dados; // 4 bytes
-
-      // Vai guardar o status do sensor
-      Status status; // 4 bytes
-} TSensor; // 24 bytes total
+      int sensor_id;          // id do sensor (1-20)
+      char datetime_str[20];  // data e hora no formato "AAAA-MM-DD HH:MM:SS"
+      SensorTipo tipo;        // tipo do sensor (enum)
+      float dados;            // valor medido pelo sensor
+      Status status;          // status da leitura (enum): OK, ALERTA ou CRITICO
+} TSensor;
 
 typedef struct {
       // Soma dos valores dos sensores
@@ -38,12 +30,6 @@ typedef struct {
       float media;
       float desvio;
 } TStatSensor;
-
-typedef struct {
-      int sensor_id;
-      char datetime[20];
-      float valor;
-} TAnomalia;
 
 typedef struct {
     int inicio;
